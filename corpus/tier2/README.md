@@ -12,6 +12,8 @@ files (flat layout — one directory, not nested).
 | Permissive clones via [`tools/fetch-corpus.sh`](../../tools/fetch-corpus.sh) | varies | Candidate hunt only — inventory with `tools/corpus-health.sh` |
 | BIM4LCA / Nordic LCA (VTT, Granlund, Gravicon, Insinööritoimisto Kallinen), `ARCH.zip` (sha256 `025e33fb0c0ce3b7a869f4177a0862918cc987408f4cd34e58a0eabd8d9917c4`) listed at <https://cris.vtt.fi/en/publications/bim-files-to-download/> | CC BY-SA 4.0 | Fetch by URL, never committed. `ARK_NordicLCA_Housing_Timber_BuildingPermit.rvt` (Revit 2024, 93 MB, sha256 `3df759b8b986c1e2ca71a691cdab16bcc7063a07e273003bf02cac559573c6d4`) for `tests/level_shared_elevation.rs`; set `RVT_NORDIC_LCA_DIR` to its folder. Attribution: BIM4LCA, CC BY-SA 4.0. |
 
+| BIM4LCA / Nordic LCA (VTT, Granlund, Gravicon, Insinööritoimisto Kallinen) | CC BY-SA 4.0 | Fetch by URL, never committed. `ARK_NordicLCA_Housing_Terrain-Concrete_BuildingPermit.rvt` (Revit 2024, 17.6 MB, sha256 `23675d6cb61dc917798ad346841fe897f7c66a8154c0397625aef86e8d48fe05`) with Revit's `..._Revit.ifc` (sha256 `c3946ee408ae0d598c44581f2b3e3c9d963d9611fb10dd141a411c1138073be6`), both from `ARCH.zip` (sha256 `025e33fb0c0ce3b7a869f4177a0862918cc987408f4cd34e58a0eabd8d9917c4`) listed at <https://cris.vtt.fi/en/publications/bim-files-to-download/>. Put the two files in one folder and set `RVT_NORDIC_LCA_DIR` for `tests/level_parameters.rs`. Attribution: BIM4LCA, CC BY-SA 4.0. |
+
 **Do not** commit Autodesk-owned samples (see `SECURITY.md`).
 
 ## Local setup
