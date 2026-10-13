@@ -519,6 +519,20 @@ pub const MEP_CURVE_TYPE_NAME_OFFSET: usize = 306;
 /// that places all five pipe and duct type names Revit's export gives. An
 /// id whose occurrences give different names is dropped.
 pub fn find_mep_curve_type_names(buf: &[u8], wanted: &BTreeSet<u32>) -> BTreeMap<u32, String> {
+    let mut names = find_mep_curve_type_names_2025(buf, wanted);
+    let missing: BTreeSet<u32> = wanted
+        .iter()
+        .copied()
+        .filter(|id| !names.contains_key(id))
+        .collect();
+    if !missing.is_empty() {
+        names.extend(find_mep_curve_type_names_2024(buf, &missing));
+    }
+    names
+}
+
+/// [`find_mep_curve_type_names`] in the Revit 2025 layout (RE-130).
+fn find_mep_curve_type_names_2025(buf: &[u8], wanted: &BTreeSet<u32>) -> BTreeMap<u32, String> {
     let mut found: BTreeMap<u32, Option<String>> = BTreeMap::new();
     let (Some(&low), Some(&high)) = (wanted.first(), wanted.last()) else {
         return BTreeMap::new();
@@ -558,6 +572,103 @@ pub fn find_mep_curve_type_names(buf: &[u8], wanted: &BTreeSet<u32>) -> BTreeMap
         if name.trim().is_empty() || name.chars().any(char::is_control) {
             continue;
         }
+        match found.get_mut(&id) {
+            None => {
+                found.insert(id, Some(name));
+            }
+            Some(slot) => {
+                if slot.as_deref() != Some(name.as_str()) {
+                    *slot = None;
+                }
+            }
+        }
+    }
+    found
+        .into_iter()
+        .filter_map(|(id, name)| name.map(|n| (id, n)))
+        .collect()
+}
+
+/// Distances from a Revit 2024 pipe or duct type's ElementId to its second
+/// copy: 54 on rigid and flex duct types, 58 on pipe types (spike 265).
+const MEP_CURVE_TYPE_ID_REPEAT_2024: std::ops::RangeInclusive<usize> = 40..=64;
+
+/// Bytes after that second copy the name's `u32` length lies in: 240 (flex
+/// duct), 246 (rigid duct), 249 (conduit), 250 (pipe, 56 on), 253 (cable
+/// tray) and 254 (pipe, 58 on), the distance varying with the object's fixed
+/// lists. The first plausible name in the window is the type's.
+const MEP_CURVE_TYPE_NAME_WINDOW_2024: std::ops::RangeInclusive<usize> = 200..=290;
+
+/// The bytes that precede a type's name by [`MEP_CURVE_TYPE_NAME_LEAD_2024`]
+/// bytes: an unset `u32` (`ff` × 4) and a `u16` of 0x7d (pipe, flex duct,
+/// round duct and conduit types) or 0x80 (rigid duct types). An MEP system,
+/// which also carries its ElementId twice 54 or 56 bytes apart and a name
+/// within the same window, has `e3 0c` after its unset words, not these.
+fn is_mep_curve_type_name_marker_2024(marker: &[u8]) -> bool {
+    matches!(marker, [0xff, 0xff, 0xff, 0xff, 0x7d | 0x80, 0x00])
+}
+
+/// How far before a name that marker starts.
+const MEP_CURVE_TYPE_NAME_LEAD_2024: std::ops::RangeInclusive<usize> = 6..=24;
+
+/// For each id in `wanted`, the name of the Revit 2024 pipe, duct, conduit or
+/// cable tray type with that id (spike 265): the ElementId, the same
+/// ElementId again [`MEP_CURVE_TYPE_ID_REPEAT_2024`] bytes on, and the first
+/// length-prefixed UTF-16 name within [`MEP_CURVE_TYPE_NAME_WINDOW_2024`]
+/// bytes after that copy that follows [`is_mep_curve_type_name_marker_2024`]'s marker.
+/// Like [`find_mep_curve_type_names`], an id whose occurrences give
+/// different names is dropped.
+fn find_mep_curve_type_names_2024(buf: &[u8], wanted: &BTreeSet<u32>) -> BTreeMap<u32, String> {
+    let mut found: BTreeMap<u32, Option<String>> = BTreeMap::new();
+    let (Some(&low), Some(&high)) = (wanted.first(), wanted.last()) else {
+        return BTreeMap::new();
+    };
+    let reach = MEP_CURVE_TYPE_ID_REPEAT_2024.end() + MEP_CURVE_TYPE_NAME_WINDOW_2024.end() + 4;
+    for at in 0..buf.len().saturating_sub(reach + 8) {
+        let value = read_u64(buf, at).expect("in bounds");
+        if value < u64::from(low) || value > u64::from(high) {
+            continue;
+        }
+        let id = value as u32;
+        if !wanted.contains(&id) {
+            continue;
+        }
+        let Some(second) = MEP_CURVE_TYPE_ID_REPEAT_2024
+            .clone()
+            .map(|distance| at + distance)
+            .find(|&second| read_u64(buf, second) == Some(value))
+        else {
+            continue;
+        };
+        let name = MEP_CURVE_TYPE_NAME_WINDOW_2024.clone().find_map(|offset| {
+            let units = usize::try_from(read_u32(buf, second + offset)?).ok()?;
+            if !(1..=NAME_MAX_UNITS).contains(&units) {
+                return None;
+            }
+            let at = second + offset;
+            MEP_CURVE_TYPE_NAME_LEAD_2024.clone().find(|&lead| {
+                at.checked_sub(lead)
+                    .and_then(|from| buf.get(from..from + 6))
+                    .is_some_and(is_mep_curve_type_name_marker_2024)
+            })?;
+            let start = second + offset + 4;
+            let code_units: Vec<u16> = buf
+                .get(start..start + units * 2)?
+                .chunks_exact(2)
+                .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+                .collect();
+            let name = String::from_utf16(&code_units).ok()?;
+            // Bytes that are not a name read as CJK or symbol code units, so
+            // a name is Latin text: ASCII, Latin-1 and Latin Extended.
+            let latin = |c: char| matches!(c, ' '..='~' | '\u{c0}'..='\u{24f}');
+            (name.chars().count() >= 2
+                && name.starts_with(|c: char| c.is_alphanumeric())
+                && name.chars().all(latin))
+            .then_some(name)
+        });
+        let Some(name) = name else {
+            continue;
+        };
         match found.get_mut(&id) {
             None => {
                 found.insert(id, Some(name));

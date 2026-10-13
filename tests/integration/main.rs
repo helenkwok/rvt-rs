@@ -97,6 +97,8 @@ mod level_parameters;
 mod level_shared_elevation;
 #[path = "../mep_connections.rs"]
 mod mep_connections;
+#[path = "../mep_curve_types.rs"]
+mod mep_curve_types;
 #[path = "../mep_systems.rs"]
 mod mep_systems;
 #[path = "../native_current_records.rs"]

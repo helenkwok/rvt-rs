@@ -392,6 +392,8 @@ pub fn recover_partition_schema_mvp(
     attach_pipe_type_names(rf, &mut out.products);
     // --- Ducts' and pipes' sizes, and ducts' types (RE-134) ---
     attach_curve_fields(rf, revit_version, &mut out.products);
+    // --- Ducts' system families, from their types' shapes (B59) ---
+    attach_duct_system_families(rf, &mut out.products);
     // --- Pipe fittings' nominal sizes, from their connectors (RE-165) ---
     attach_fitting_nominal_diameters(rf, revit_version, &mut out.products);
     // --- The shared parameter Serial Number (RE-156) ---
@@ -2184,13 +2186,13 @@ fn attach_type_text_parameters(
     }
 }
 
-/// Give each pipe without a type the one id in its record's reference
-/// list that carries a pipe or duct type name
+/// Give each pipe and duct without a type the one id in its record's
+/// reference list that carries a pipe or duct type name
 /// ([`crate::partition_names::find_mep_curve_type_names`], RE-130). Pipe
 /// and duct types have no name entry, so
-/// [`crate::partition_names::resolve_type`] finds none for them. Ducts are
-/// left alone: their system family follows their type's shape, which is not
-/// read.
+/// [`crate::partition_names::resolve_type`] finds none for them. A duct's
+/// system family follows its type's shape, which
+/// [`attach_duct_system_families`] reads.
 fn attach_pipe_type_names(rf: &mut RevitFile, elements: &mut [DecodedElement]) {
     let has_type = |element: &DecodedElement| {
         element
@@ -2198,15 +2200,16 @@ fn attach_pipe_type_names(rf: &mut RevitFile, elements: &mut [DecodedElement]) {
             .iter()
             .any(|(name, _)| name == TYPE_NAME_FIELD)
     };
+    let is_curve = |element: &DecodedElement| matches!(element.class.as_str(), "Pipe" | "Duct");
     if !elements
         .iter()
-        .any(|element| element.class == "Pipe" && !has_type(element))
+        .any(|element| is_curve(element) && !has_type(element))
     {
         return;
     }
     let mut pending: Vec<(usize, BTreeSet<u32>)> = Vec::new();
     for (index, element) in elements.iter().enumerate() {
-        if element.class != "Pipe" || has_type(element) {
+        if !is_curve(element) || has_type(element) {
             continue;
         }
         let (Some(own), Some((references, _))) = (element.id, record_references(rf, element))
@@ -4690,7 +4693,6 @@ fn attach_curve_fields(rf: &mut RevitFile, revit_version: u32, products: &mut [D
             InstanceField::String(type_name.clone()),
         ));
     }
-    attach_duct_system_families(rf, products);
 }
 
 /// Give each typed duct the system family its type's shape names

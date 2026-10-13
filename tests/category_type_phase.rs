@@ -95,7 +95,7 @@ pub(crate) fn decode(raw: &str) -> String {
 
 /// `Tag -> (set, property) -> value` for the `CHECKED` properties of every
 /// element that has a `Tag`.
-fn checked_values(step: &str) -> BTreeMap<String, BTreeMap<(String, String), String>> {
+pub(crate) fn checked_values(step: &str) -> BTreeMap<String, BTreeMap<(String, String), String>> {
     let mut ents: BTreeMap<u64, (String, Vec<String>)> = BTreeMap::new();
     for line in step.lines() {
         let Some((id, body)) = line.strip_prefix('#').and_then(|r| r.split_once('=')) else {
