@@ -11,6 +11,8 @@
 mod arc_wall_corpus;
 #[path = "../binary_inventory.rs"]
 mod binary_inventory;
+#[path = "../boxless_room.rs"]
+mod boxless_room;
 #[path = "../category_type_phase.rs"]
 mod category_type_phase;
 #[path = "../cfb_roundtrip_delta.rs"]

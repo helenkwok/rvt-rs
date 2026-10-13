@@ -1514,6 +1514,57 @@ pub fn scan_volumeless_instances(
     Ok(by_class)
 }
 
+/// Placed instances of `builtin_category` whose record carries no box
+/// (spike 259): ElementId → `(stream, offset)` of the record.
+///
+/// Such a record is an element record up to the class tag, then a `u32` of
+/// 0 where a boxed one has `0xFFFF_FFFF` and the `Outline` tag, then
+/// `0xFF`×4 and the `ElementParents` tag at `+0x50` and its reference list
+/// at `+0x56`: the box is simply absent. [`decode_at`] rejects it, so the
+/// element was dropped. On BIM4LCA `ARK_NordicLCA_Office_Timber_As-Built`
+/// the one such room (3128929) is a space in Revit's own IFC export; across
+/// the twelve BIM4LCA files and the Autodesk 2024 samples no other room
+/// record has this shape. Only records of the partition's leading chain
+/// ([`partition_record_chain`]) count, and only standalone placed
+/// instances ([`PartitionElementRecord::is_exported_instance`]'s rule) of
+/// the main model or a primary design option.
+pub fn scan_boxless_instances(
+    rf: &mut RevitFile,
+    revit_version: u32,
+    builtin_category: i64,
+    declared_ids: &BTreeSet<u32>,
+) -> BTreeMap<u32, (String, usize)> {
+    let mut out = BTreeMap::new();
+    let Some(marker) = file_bbox_marker(rf, revit_version) else {
+        return out;
+    };
+    let options = rf.design_options();
+    for stream in rf.partition_stream_names() {
+        let Ok(inflated) = rf.inflated_partition(&stream) else {
+            continue;
+        };
+        let buf = inflated.bytes();
+        for span in partition_record_chain(buf, &marker) {
+            let o = span.start;
+            let Ok(id) = u32::try_from(span.element_id) else {
+                continue;
+            };
+            let boxless = read_u64(buf, o + CATEGORY_OFFSET) == Some(builtin_category as u64)
+                && read_u32(buf, o + 0x4c) == Some(0)
+                && buf.get(o + BBOX_MARKER_OFFSET..o + BBOX_MARKER_OFFSET + 6)
+                    == Some(&marker[2..])
+                && read_u64(buf, o + CONTAINER_OFFSET) == Some(CONTAINER_NONE)
+                && read_u32(buf, o + PLACEMENT_KIND_OFFSET) == Some(PLACEMENT_KIND_INSTANCE)
+                && declared_ids.contains(&id)
+                && !frame_design_option(buf, o).is_some_and(|opt| options.is_non_primary(opt));
+            if boxless {
+                out.entry(id).or_insert((stream.clone(), o));
+            }
+        }
+    }
+    out
+}
+
 /// Scan every `Partitions/*` stream for records in `builtin_category`.
 ///
 /// Returns an empty vector for unsupported releases (fail closed).
