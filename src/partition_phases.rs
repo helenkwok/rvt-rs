@@ -36,6 +36,10 @@ pub const OST_PHASES: i64 = -2_000_112;
 /// 32 zero bytes and `01 00 00 00`.
 pub const PHASE_CLASS_TAG_BEFORE_ID: usize = 2 + 32 + 4;
 
+/// The same, in the layout of Snowdon's MEP files: the tag, 20 zero bytes,
+/// `ff ff ff ff`, a 2-byte tag, 8 zero bytes and `01 00 00 00` (spike 264).
+pub const PHASE_CLASS_TAG_BEFORE_ID_B: usize = 40;
+
 /// The run of `ff` between a phase's ElementId and its name.
 const FILL: [u8; 56] = [0xff; 56];
 
@@ -63,10 +67,13 @@ pub fn find_phase_names(
             continue;
         };
         let tagged = phase_tag.is_some_and(|tag| {
-            id_at
-                .checked_sub(PHASE_CLASS_TAG_BEFORE_ID)
-                .and_then(|at| buf.get(at..at + 2))
-                == Some(&tag.to_le_bytes()[..])
+            let tag = &tag.to_le_bytes()[..];
+            let at = |back: usize| id_at.checked_sub(back).and_then(|at| buf.get(at..at + 2));
+            at(PHASE_CLASS_TAG_BEFORE_ID) == Some(tag)
+                || (at(PHASE_CLASS_TAG_BEFORE_ID_B) == Some(tag)
+                    && buf[id_at - 38..id_at - 18].iter().all(|&b| b == 0)
+                    && buf[id_at - 18..id_at - 14] == [0xff; 4]
+                    && buf[id_at - 12..id_at - 4].iter().all(|&b| b == 0))
         });
         let own_data = phase_records.contains(&id)
             && id_at >= 10
