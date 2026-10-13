@@ -16,7 +16,8 @@ use rvt::ifc::{RvtDocExporter, write_step};
 use std::path::PathBuf;
 
 fn phase_values(step: &str) -> usize {
-    step.matches("IFCPROPERTYSINGLEVALUE('Phase Created'").count()
+    step.matches("IFCPROPERTYSINGLEVALUE('Phase Created'")
+        .count()
 }
 
 #[test]
@@ -44,9 +45,6 @@ fn snowdon_mep_elements_carry_phase_created() {
             .expect("export");
         let ours = phase_values(&write_step(&result.model));
         eprintln!("{part}: Phase Created ours {ours} of {theirs}");
-        assert!(
-            ours * 100 >= theirs * 99,
-            "{part}: {ours} of {theirs}"
-        );
+        assert!(ours * 100 >= theirs * 99, "{part}: {ours} of {theirs}");
     }
 }
