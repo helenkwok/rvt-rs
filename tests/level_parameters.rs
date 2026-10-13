@@ -27,6 +27,20 @@ const NAMES: [(&str, usize); 6] = [
     ("Top Level", 4),
 ];
 
+/// `value` with its quoted text decoded (`\X\hh`, `\X2\…\X0\`, `''`), so the
+/// same name written by Revit's encoder and ours compares equal.
+fn step_text(value: &str) -> String {
+    match (value.find('\''), value.rfind('\'')) {
+        (Some(a), Some(b)) if b > a => format!(
+            "{}'{}'{}",
+            &value[..a],
+            super::category_type_phase::decode(&value[a + 1..b]),
+            &value[b + 1..]
+        ),
+        _ => value.to_string(),
+    }
+}
+
 /// (element `Tag`, property) -> value as written, from every `Constraints` set.
 fn constraints(step: &str) -> BTreeMap<(String, String), String> {
     let ents = entities(step);
@@ -57,7 +71,7 @@ fn constraints(step: &str) -> BTreeMap<(String, String), String> {
             .filter_map(|(_, a)| {
                 let pf = split_args(a);
                 let name = unquote(pf.first()?);
-                let value = pf.get(2)?.trim().to_string();
+                let value = step_text(pf.get(2)?.trim());
                 NAMES
                     .iter()
                     .any(|(n, _)| *n == name)
@@ -338,7 +352,7 @@ fn level_parameters_survey_are_revits() {
                 .filter(|((tag, _), value)| {
                     storeys
                         .get(tag)
-                        .is_some_and(|s| format!("IFCLABEL('{s}')") == **value)
+                        .is_some_and(|s| step_text(&format!("IFCLABEL('{s}')")) == **value)
                 })
                 .count();
             eprintln!(

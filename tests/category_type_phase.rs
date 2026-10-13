@@ -70,7 +70,7 @@ fn unquote(attr: &str) -> Option<String> {
 
 /// A STEP string's text: `''`, `\X\hh` (ISO 8859-1) and `\X2\hhhh…\X0\`
 /// (UTF-16), which Revit's writer and ours use differently.
-fn decode(raw: &str) -> String {
+pub(crate) fn decode(raw: &str) -> String {
     let (mut out, mut rest) = (String::new(), raw.replace("''", "'"));
     while let Some(at) = rest.find('\\') {
         out.push_str(&rest[..at]);
