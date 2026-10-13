@@ -5197,15 +5197,73 @@ pub fn rooms_from_partition_category_records(
     else {
         return Ok(Vec::new());
     };
-    let room_ids: BTreeSet<u32> = records
+    let mut room_ids: BTreeSet<u32> = records
         .iter()
         .filter(|record| record.is_exported_instance())
         .map(|record| record.element_id)
         .collect();
+    // Spike 259: a room whose record carries no box is still a room.
+    let declared = crate::elem_table::parse_records(rf)
+        .map(|records| crate::elem_table::declared_ids(&records))
+        .unwrap_or_default();
+    let mut boxless = crate::partition_element_records::scan_boxless_instances(
+        rf,
+        revit_version,
+        crate::partition_element_records::OST_ROOMS,
+        &declared,
+    );
+    boxless.retain(|id, _| !room_ids.contains(id));
+    room_ids.extend(boxless.keys());
     let parameters =
         crate::partition_room_parameters::scan_room_parameters(rf, revit_version, &room_ids)
             .unwrap_or_default();
     let mut rooms = room_instances_from_records(records, &parameters, level_ids);
+    rooms.extend(boxless.into_iter().map(|(id, (stream, offset))| {
+        let mut decoded = DecodedElement {
+            id: Some(id),
+            class: "Room".into(),
+            fields: vec![
+                (
+                    "m_builtinCategory".into(),
+                    InstanceField::Integer {
+                        value: crate::partition_element_records::OST_ROOMS,
+                        signed: true,
+                        size: 8,
+                    },
+                ),
+                (
+                    "m_source_stream".into(),
+                    InstanceField::String(stream.clone()),
+                ),
+                (
+                    "m_source_offset".into(),
+                    InstanceField::Integer {
+                        value: offset as i64,
+                        signed: false,
+                        size: 8,
+                    },
+                ),
+                (
+                    "m_source".into(),
+                    InstanceField::String(BOXLESS_ROOM_SOURCE.into()),
+                ),
+                ("m_level_bound".into(), InstanceField::Bool(false)),
+            ],
+            byte_range: offset..offset,
+            provenance: ElementProvenance::partition(
+                &stream,
+                offset,
+                "partition_element_record",
+                "partition_schema_mvp::boxless_room_record",
+                0.7,
+                Some("no_record_box"),
+            ),
+        };
+        if let Some(block) = parameters.get(&id) {
+            attach_room_block(&mut decoded, block, level_ids);
+        }
+        decoded
+    }));
     // RE-117: a room's number and name are the ones its parameter entries
     // give it; RE-29's block stands in where they are not read, and still
     // gives the Level. On Snowdon Towers the block names 1 of 54 rooms, and
@@ -5370,41 +5428,53 @@ pub fn room_instances_from_records(
         .map(|record| {
             let mut decoded = element_record_decoded(record, "Room", level_ids);
             if let Some(block) = parameters.get(&record.element_id) {
-                decoded
-                    .fields
-                    .push(("m_name".into(), InstanceField::String(block.name.clone())));
-                decoded.fields.push((
-                    ROOM_NUMBER_FIELD.into(),
-                    InstanceField::String(block.number.clone()),
-                ));
-                decoded.fields.push((
-                    ROOM_PARAMETER_SOURCE_FIELD.into(),
-                    InstanceField::String(
-                        crate::partition_room_parameters::ROOM_PARAMETER_SOURCE.into(),
-                    ),
-                ));
-                let already_bound = decoded.fields.iter().any(|(name, _)| {
-                    name == crate::element_record_level_refs::LEVEL_REFERENCE_FIELD
-                });
-                if !already_bound {
-                    if let Some(id) = block.level_element_id(level_ids) {
-                        decoded.fields.push((
-                            crate::element_record_level_refs::LEVEL_REFERENCE_FIELD.into(),
-                            InstanceField::ElementId { tag: 0, id },
-                        ));
-                        if let Some(slot) = decoded
-                            .fields
-                            .iter_mut()
-                            .find(|(name, _)| name == "m_level_bound")
-                        {
-                            slot.1 = InstanceField::Bool(true);
-                        }
-                    }
-                }
+                attach_room_block(&mut decoded, block, level_ids);
             }
             decoded
         })
         .collect()
+}
+
+/// `m_source` of a room recovered from a record without a box (spike 259):
+/// it has an identity, a name, a number and a Level, and no geometry.
+pub const BOXLESS_ROOM_SOURCE: &str = "partition_element_record_boxless";
+
+/// A room's number, name and Level from its RE-29 parameter block.
+fn attach_room_block(
+    decoded: &mut DecodedElement,
+    block: &crate::partition_room_parameters::RoomParameters,
+    level_ids: &BTreeSet<u32>,
+) {
+    decoded
+        .fields
+        .push(("m_name".into(), InstanceField::String(block.name.clone())));
+    decoded.fields.push((
+        ROOM_NUMBER_FIELD.into(),
+        InstanceField::String(block.number.clone()),
+    ));
+    decoded.fields.push((
+        ROOM_PARAMETER_SOURCE_FIELD.into(),
+        InstanceField::String(crate::partition_room_parameters::ROOM_PARAMETER_SOURCE.into()),
+    ));
+    let already_bound = decoded
+        .fields
+        .iter()
+        .any(|(name, _)| name == crate::element_record_level_refs::LEVEL_REFERENCE_FIELD);
+    if !already_bound {
+        if let Some(id) = block.level_element_id(level_ids) {
+            decoded.fields.push((
+                crate::element_record_level_refs::LEVEL_REFERENCE_FIELD.into(),
+                InstanceField::ElementId { tag: 0, id },
+            ));
+            if let Some(slot) = decoded
+                .fields
+                .iter_mut()
+                .find(|(name, _)| name == "m_level_bound")
+            {
+                slot.1 = InstanceField::Bool(true);
+            }
+        }
+    }
 }
 
 /// Recover architectural column instances from partition element
